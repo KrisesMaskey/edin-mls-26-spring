@@ -43,6 +43,13 @@ else
 fi
 
 # =========================
+# Accept conda Terms of Service
+# =========================
+echo ">>> Accepting conda channel Terms of Service"
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main 2>/dev/null || true
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r 2>/dev/null || true
+
+# =========================
 # Create conda environment
 # =========================
 if conda env list | grep -q "^${ENV_NAME} "; then
