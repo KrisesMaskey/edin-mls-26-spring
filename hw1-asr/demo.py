@@ -111,13 +111,9 @@ def load_scratch_model():
     from huggingface_hub import snapshot_download
     model_dir = snapshot_download("zai-org/GLM-ASR-Nano-2512")
 
-    inference = importlib.import_module("inference")
-    model = inference.load_model_from_pretrained(model_dir)
-    processor = inference.load_processor_from_pretrained(model_dir)
-
-    # Pre-load tokenizer
-    from tokenizers import Tokenizer
-    tokenizer = Tokenizer.from_file(str(Path(model_dir) / "tokenizer.json"))
+    torch_glm = importlib.import_module("torch_glm")
+    model, processor = torch_glm.load_model_and_processor(model_path=model_dir, dtype="auto")
+    tokenizer = None
 
     load_time_ms = (time.perf_counter() - start) * 1000
 
@@ -184,14 +180,27 @@ def transcribe_scratch(audio_array, model, processor, tokenizer):
     if scratch_path not in sys.path:
         sys.path.insert(0, scratch_path)
 
-    inference = importlib.import_module("inference")
+    torch_glm = importlib.import_module("torch_glm")
 
     torch.cuda.synchronize() if torch.cuda.is_available() else None
 
     start = time.perf_counter()
-    transcription = inference.transcribe(model, processor, audio_array, max_new_tokens=200)
+    transcription = torch_glm.transcribe(model, processor, audio_array, max_new_tokens=200)
     torch.cuda.synchronize() if torch.cuda.is_available() else None
     elapsed_ms = (time.perf_counter() - start) * 1000
+
+    if isinstance(transcription, list):
+        transcription = transcription[0]
+
+    prompt = getattr(processor, "default_prompt", None)
+    if prompt and prompt in transcription:
+        transcription = transcription.split(prompt, 1)[-1].strip()
+    for prompt_variant in [
+        "Please transcribe this audio into text",
+        "Transcribe this audio into text."
+    ]:
+        if transcription.startswith(prompt_variant):
+            transcription = transcription[len(prompt_variant):].strip()
 
     return transcription, elapsed_ms
 
