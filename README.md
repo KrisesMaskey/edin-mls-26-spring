@@ -11,6 +11,11 @@ git clone <repo-url> && cd edin-mls-26-spring
 # 2. Set up the conda environment
 source utils/setup-cutile.sh  # cuTile + hw1
 # source utils/setup-triton.sh  # Triton-only (torch, numpy, triton)
+# If `conda` isn't on PATH in a new shell:
+# <conda> is your conda install prefix (e.g. ~/miniconda3 or /opt/conda).
+# You can find it with: conda info --base
+# source <conda>/bin/activate
+# conda activate mls
 
 # 3. Verify your environment
 python cutile-tutorial/0-environment/check.py   # For cuTile

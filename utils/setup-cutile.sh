@@ -9,6 +9,7 @@ PYTHON_VERSION="3.11"
 CUDA_TAG="cuda13x"
 MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
 MINICONDA_INSTALL_DIR="${HOME}/miniconda3"
+CONDA_ACTIVATE=""
 
 # Parse command line arguments
 AUTO_YES=false
@@ -98,12 +99,23 @@ ask_continue "Proceed with environment setup?"
 # =========================
 if command -v conda >/dev/null 2>&1; then
 	echo ">>> conda found: $(conda --version)"
+	CONDA_BASE="$(conda info --base 2>/dev/null || true)"
+	if [ -n "${CONDA_BASE}" ]; then
+		CONDA_ACTIVATE="${CONDA_BASE}/bin/activate"
+	else
+		CONDA_BIN="$(command -v conda)"
+		if [[ "${CONDA_BIN}" == /* ]]; then
+			CONDA_ACTIVATE="$(dirname "${CONDA_BIN}")/activate"
+		fi
+	fi
 	eval "$(conda shell.bash hook)"
 elif [ -x "${MINICONDA_INSTALL_DIR}/bin/conda" ]; then
 	echo ">>> conda found at ${MINICONDA_INSTALL_DIR}/bin/conda"
+	CONDA_ACTIVATE="${MINICONDA_INSTALL_DIR}/bin/activate"
 	eval "$("${MINICONDA_INSTALL_DIR}/bin/conda" shell.bash hook)"
 elif [ -x /opt/conda/bin/conda ]; then
 	echo ">>> conda found at /opt/conda/bin/conda"
+	CONDA_ACTIVATE="/opt/conda/bin/activate"
 	eval "$(/opt/conda/bin/conda shell.bash hook)"
 else
 	echo ">>> conda not found."
@@ -115,6 +127,7 @@ else
 	rm -f "${MINICONDA_INSTALLER}"
 
 	# Activate conda for current session
+	CONDA_ACTIVATE="${MINICONDA_INSTALL_DIR}/bin/activate"
 	eval "$("${MINICONDA_INSTALL_DIR}/bin/conda" shell.bash hook)"
 
 	# Initialize conda for future shells (both bash and zsh)
@@ -153,6 +166,13 @@ if [ "${AUTO_YES}" = true ]; then
 	echo ">>> Activated environment: ${ENV_NAME}"
 else
 	conda activate "${ENV_NAME}"
+fi
+
+if [ -z "${CONDA_ACTIVATE}" ]; then
+	CONDA_BASE="$(conda info --base 2>/dev/null || true)"
+	if [ -n "${CONDA_BASE}" ]; then
+		CONDA_ACTIVATE="${CONDA_BASE}/bin/activate"
+	fi
 fi
 
 # =========================
@@ -297,7 +317,8 @@ echo " MLS Python environment is ready."
 echo " (Machine Learning Systems - cutile + hw1)"
 echo "============================================="
 echo
-echo "Activate with:"
+echo "If conda isn't on PATH, run:"
+echo "  source ${CONDA_ACTIVATE}"
 echo "  conda activate ${ENV_NAME}"
 echo
 echo "Installed key packages:"
@@ -325,7 +346,5 @@ else
 	echo "  PYTHONPATH includes hack-hopper on activation"
 fi
 echo
-echo "NOTE: You may need to restart your shell or run:"
-echo "  source ~/.bashrc  # or ~/.zshrc"
-echo "  conda activate ${ENV_NAME}"
+echo "NOTE: If you installed Miniconda now, restart your shell if needed."
 echo

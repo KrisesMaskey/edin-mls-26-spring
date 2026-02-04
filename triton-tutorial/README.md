@@ -27,6 +27,13 @@ pip install torch numpy triton
 conda activate mls
 ```
 
+If `conda` isn't on PATH in a new shell (`<conda>` is the conda install prefix, e.g. `~/miniconda3` or `/opt/conda`):
+
+```bash
+source <conda>/bin/activate
+conda activate mls
+```
+
 ## Running Tutorials
 
 ```bash

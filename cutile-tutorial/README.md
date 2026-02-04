@@ -24,6 +24,13 @@ conda activate mls
 source utils/hack.sh  # Run from project root
 ```
 
+If `conda` isn't on PATH in a new shell (`<conda>` is the conda install prefix, e.g. `~/miniconda3` or `/opt/conda`):
+
+```bash
+source <conda>/bin/activate
+conda activate mls
+```
+
 ## Running Tutorials
 
 ### Blackwell GPU (RTX 50 series, B100, B200)
