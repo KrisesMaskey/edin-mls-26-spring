@@ -1,24 +1,25 @@
 # GLM-ASR Student Assignment
 
-This assignment helps you understand GPU kernel optimization by implementing a speech recognition model using NVIDIA CuTile.
+This assignment helps you understand GPU kernel optimization by implementing a speech recognition model using Triton and NVIDIA cuTile.
 
 ## Overview
 
-GLM-ASR is a speech-to-text model that converts audio into text. This HW1 includes a Triton example and CuTile template, and focuses on performance optimization.
+GLM-ASR is a speech-to-text model that converts audio into text. This HW1 includes Triton and cuTile tracks (example + template) and focuses on performance optimization.
 
 ## Frameworks
 
-- **Triton**: Example baseline implementation (Torch + Triton kernels)
-- **cuTile**: Current HW1 implementation (CuPy + CuTile kernels)
+- **Triton**: Example + template implementations (Torch + Triton kernels)
+- **cuTile**: Example + template implementations (CuPy + cuTile kernels)
 
 ## Directory Structure
 
 ```
 student_version/
-├── glm_asr_triton_example/    # Reference: Triton baseline (Torch + Triton)
-├── glm_asr_cutile_template/   # YOUR WORK: Complete the TODOs here
-├── glm_asr_cutile_example/    # Reference: Example baseline (Initial CuPy, ~3200ms)
-├── glm_asr_scratch/           # Reference: PyTorch baseline
+├── glm_asr_triton_example/     # Reference: Triton baseline (Torch + Triton)
+├── glm_asr_triton_template/    # YOUR WORK: Complete the TODOs here (Triton)
+├── glm_asr_cutile_example/     # Reference: Example baseline (Initial CuPy, ~3200ms)
+├── glm_asr_cutile_template/    # YOUR WORK: Complete the TODOs here (cuTile)
+├── glm_asr_scratch/            # Reference: PyTorch baseline
 ├── demo.py                    # Streamlit interactive demo
 ├── benchmark.sh               # Shell wrapper for benchmark_student.py
 ├── benchmark_student.py       # Python benchmark script
@@ -36,27 +37,74 @@ student_version/
 | `glm_asr_cutile_example` | Baseline: Pure CuPy | ~3200ms |
 | `glm_asr_scratch` | PyTorch reference implementation | - |
 
+### Student Templates
+
+| Version | Description |
+|---------|-------------|
+| `glm_asr_triton_template` | Triton template (TODO kernels) |
+| `glm_asr_cutile_template` | cuTile template (TODO kernels) |
+
 ## Quick Start
+
+Choose a track below (Triton first).
+
+### Triton Track
 
 Environment setup (from repo root):
 ```bash
-source utils/setup-cutile.sh   # CuTile track
+source utils/setup-triton.sh
+# Optional: demo deps (if not already installed)
+# pip install transformers huggingface_hub streamlit soundfile scipy
+```
+
+1. Test reference implementation:
+```bash
+./benchmark.sh glm_asr_triton_example
+```
+
+2. Test your implementation:
+```bash
+./benchmark.sh glm_asr_triton_template
+```
+
+3. Check performance:
+```bash
+./benchmark_detailed.sh glm_asr_triton_template
+```
+
+4. Try interactive demo:
+```bash
+streamlit run demo.py
+```
+
+### cuTile Track
+
+Environment setup (from repo root):
+```bash
+source utils/setup-cutile.sh
 ```
 
 `setup-cutile.sh` installs common ML tooling used by the demo:
 `transformers`, `huggingface_hub`, `streamlit`, `soundfile`, `scipy`.
 
-### 1. Test Reference Implementations
-
-First, verify the reference implementations work:
-
+1. Test reference implementation:
 ```bash
-# Test baseline (~3200ms)
 ./benchmark.sh glm_asr_cutile_example
+```
 
-# Test Triton baseline
-./benchmark.sh glm_asr_triton_example
+2. Test your implementation:
+```bash
+./benchmark.sh glm_asr_cutile_template
+```
 
+3. Check performance:
+```bash
+./benchmark_detailed.sh glm_asr_cutile_template
+```
+
+4. Try interactive demo:
+```bash
+streamlit run demo.py
 ```
 
 Expected output:
@@ -66,36 +114,19 @@ Accuracy: 100.0%
 Status: PASS
 ```
 
-### 2. Test Your Implementation
-
-After completing your work:
-
-```bash
-./benchmark.sh glm_asr_cutile_template
-```
-
-### 3. Check Performance
-
-```bash
-./benchmark_detailed.sh glm_asr_cutile_template
-```
-
-### 4. Try Interactive Demo
-
-```bash
-streamlit run demo.py
-```
-
 ## Your Task
 
-Open `glm_asr_cutile_template/` and complete the TODO sections in:
+Open the template for your track and complete the TODO sections in:
 
-| File | What to Implement |
-|------|-------------------|
-| `layers.py` | Linear layer, MLP, Embedding |
-| `attention.py` | Multi-head attention |
-| `rope.py` | Rotary position embeddings |
-| `model.py` | Model forward pass |
+**Triton**
+- `glm_asr_triton_template/attention.py`
+- `glm_asr_triton_template/layers.py`
+- `glm_asr_triton_template/rope.py`
+
+**cuTile**
+- `glm_asr_cutile_template/attention.py`
+- `glm_asr_cutile_template/layers.py`
+- `glm_asr_cutile_template/rope.py`
 
 ### Key Files Explained
 
@@ -125,27 +156,30 @@ Shell scripts provide user-friendly wrappers with folder validation and help mes
 # Show available folders
 ./benchmark.sh
 
-# Basic correctness test
+# Basic correctness test (Triton)
+./benchmark.sh glm_asr_triton_template
+
+# Basic correctness test (cuTile)
 ./benchmark.sh glm_asr_cutile_template
 
-# Test baseline
+# Test baselines
+./benchmark.sh glm_asr_triton_example
 ./benchmark.sh glm_asr_cutile_example
 
-# Test Triton baseline
-./benchmark.sh glm_asr_triton_example
-
 # Detailed performance analysis
+./benchmark_detailed.sh glm_asr_triton_template
 ./benchmark_detailed.sh glm_asr_cutile_template
 
-# Detailed performance analysis (Triton)
+# Detailed performance analysis (baselines)
 ./benchmark_detailed.sh glm_asr_triton_example
+./benchmark_detailed.sh glm_asr_cutile_example
 
 # Profile specific operators
 ./benchmark_detailed.sh --attention-only
 ./benchmark_detailed.sh --linear-only
 
 # Generate Nsight Systems profile
-./benchmark_detailed.sh glm_asr_cutile_template --nsys
+./benchmark_detailed.sh glm_asr_triton_template --nsys
 ```
 
 ### Python Scripts (More control)
@@ -154,12 +188,15 @@ Python scripts offer more options and can be used directly without shell.
 
 ```bash
 # Basic benchmark with options
+python benchmark_student.py glm_asr_triton_template
+python benchmark_student.py glm_asr_triton_example --warmup 1 --runs 3
 python benchmark_student.py glm_asr_cutile_template
 python benchmark_student.py glm_asr_cutile_example --warmup 1 --runs 3
-python benchmark_student.py glm_asr_triton_example --warmup 1 --runs 3
 # Detailed profiling
-python benchmark_detailed.py glm_asr_cutile_template
+python benchmark_detailed.py glm_asr_triton_template
 python benchmark_detailed.py glm_asr_triton_example
+python benchmark_detailed.py glm_asr_cutile_template
+python benchmark_detailed.py glm_asr_cutile_example
 ```
 
 ### Streamlit Demo
@@ -170,7 +207,7 @@ Interactive web UI for testing transcription:
 streamlit run demo.py
 ```
 
-Select from: `Triton Example (Baseline)`, `CuTile Example (Baseline)`, `CuTile Template`, `Scratch (PyTorch)`
+Select from: `Triton Example (Baseline)`, `Triton Template`, `CuTile Example (Baseline)`, `CuTile Template`, `Scratch (PyTorch)`
 
 ### Check the WebUI of your slurm job on your PC
 First, check the port from the output of `streamlit run demo.py`.
@@ -185,6 +222,7 @@ In the output of `show_tunnel.sh`, you will get the instruction of running a spe
 ## Tips
 
 1. **Study the references**:
+   - `glm_asr_triton_example/` - Triton baseline, easier to map to template
    - `glm_asr_cutile_example/` - Simple baseline, easier to understand
 
 2. **Test incrementally**: After implementing each layer, run the benchmark to check correctness.
@@ -215,6 +253,7 @@ In the output of `show_tunnel.sh`, you will get the instruction of running a spe
 
 ## Reference
 
+- [Triton Documentation](https://triton-lang.org/)
 - [CuPy Documentation](https://docs.cupy.dev/)
 - [Attention Is All You Need](https://arxiv.org/abs/1706.03762)
 - [RoPE Paper](https://arxiv.org/abs/2104.09864)
@@ -227,3 +266,18 @@ If you encounter issues:
 3. Ask during office hours
 
 Good luck!
+
+
+
+| Kernel（功能） | Triton Example | Triton Template | cuTile Example | cuTile Template |
+  |---|---|---|---|---|
+  | attention_scores_kernel | Triton kernel ✅（小维度）+ Torch fallback | Triton kernel TODO ❌（小维度会走 TODO）+ Torch fallback | cuTile kernel ✅（小维度）+ CuPy fallback | cuTile kernel TODO ❌（小维度会走 TODO）+ CuPy fallback |
+  | softmax_inplace_kernel（attention 内） | Triton kernel ✅ + Torch fallback | Triton kernel TODO ❌ + Torch fallback | cuTile kernel ✅ + CuPy fallback | cuTile kernel TODO ❌ + CuPy fallback |
+  | attention_output_kernel | Triton kernel ✅ + Torch fallback | Triton kernel TODO ❌ + Torch fallback | cuTile kernel ✅ + CuPy fallback | cuTile kernel TODO ❌ + CuPy fallback |
+  | rmsnorm_kernel | Triton kernel ✅（符合 tile 条件）+ Torch fallback | Triton kernel TODO ❌ + Torch fallback | cuTile kernel ✅ | cuTile kernel TODO ❌ |
+  | layernorm_kernel | Triton kernel ✅ + Torch fallback | Triton kernel TODO ❌ + Torch fallback | cuTile kernel ✅ | cuTile kernel TODO ❌ |
+  | gelu_kernel | Triton kernel ✅ + Torch fallback | Triton kernel TODO ❌ + Torch fallback | cuTile kernel ✅ | cuTile kernel TODO ❌ |
+  | silu_kernel | Triton kernel ✅ + Torch fallback | Triton kernel TODO ❌ + Torch fallback | cuTile kernel ✅ | cuTile kernel TODO ❌ |
+  | linear_kernel_tf32 | Triton kernel ✅ + Torch fallback | Triton kernel TODO ❌ + Torch fallback | cuTile kernel ✅ | cuTile kernel TODO ❌ |
+  | softmax_kernel（通用） | Triton kernel ✅ + Torch fallback | Triton kernel TODO ❌ + Torch fallback | cuTile kernel ✅ | cuTile kernel TODO ❌ |
+  | compute_freqs_kernel（RoPE） | Triton kernel ✅ + Torch fallback | Triton kernel TODO ❌ + Torch fallback | cuTile kernel ✅ | cuTile kernel TODO ❌ |

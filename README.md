@@ -65,8 +65,10 @@ edin-mls-26-spring/
 │   └── *.pdf                 # Course slides
 │
 ├── hw1-asr/                  # Homework 1: Automatic Speech Recognition
-│   ├── glm_asr_cutile_template/  # YOUR WORK GOES HERE (fill in TODOs)
-│   ├── glm_asr_cutile_example/   # Baseline reference (~3200ms)
+│   ├── glm_asr_triton_example/   # Triton baseline reference
+│   ├── glm_asr_triton_template/  # YOUR WORK GOES HERE (Triton TODOs)
+│   ├── glm_asr_cutile_example/   # cuTile baseline (~3200ms)
+│   ├── glm_asr_cutile_template/  # YOUR WORK GOES HERE (cuTile TODOs)
 │   ├── glm_asr_scratch/          # PyTorch CPU reference
 │   ├── benchmark.sh              # Performance benchmarking
 │   ├── demo.py                   # Interactive Streamlit demo
@@ -177,24 +179,22 @@ flowchart TD
 
 ## Homework 1: Automatic Speech Recognition
 
-As we discussed in [Tool Comparison](https://github.com/ed-aisys/edin-mls-26-spring#tool-comparison), CUDA can be quite complex and daunting for beginners, while CuPy may experience significant performance issues. We aimed to strike a balance between ease of programming and performance. Therefore, we offer two frameworks for HW1: the Triton version and the CuTile version.
-
-> [!NOTE]
-> The Triton version of `hw1-asr` is not released yet and will be provided later.
+As we discussed in [Tool Comparison](https://github.com/ed-aisys/edin-mls-26-spring#tool-comparison), CUDA can be quite complex and daunting for beginners, while CuPy may experience significant performance issues. We aimed to strike a balance between ease of programming and performance. Therefore, we offer two frameworks for HW1: the Triton version and the cuTile version.
 
 The `hw1-asr/` directory contains a hands-on assignment implementing GPU-accelerated speech recognition:
 
 ```
 hw1-asr/
-├── glm_asr_cutile_template/  # Start here - fill in the TODOs
-├── glm_asr_cutile_example/   # Baseline (~3200ms)
+├── glm_asr_triton_example/   # Triton baseline reference
+├── glm_asr_triton_template/  # Start here - fill in the TODOs (Triton)
+├── glm_asr_cutile_example/   # cuTile baseline (~3200ms)
+├── glm_asr_cutile_template/  # Start here - fill in the TODOs (cuTile)
 └── glm_asr_scratch/          # PyTorch CPU version for understanding
 ```
 
 **Key files in each implementation:**
 - `layers.py` - Linear, LayerNorm, MLP, Embedding layers
 - `attention.py` - Multi-head attention mechanism
-- `flash_attention.py` - FlashAttention optimization
 - `rope.py` - Rotary Position Embedding
 - `model.py` - Full ASR model architecture
 

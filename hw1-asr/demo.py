@@ -218,6 +218,16 @@ def load_triton_example_model():
     return load_triton_model_generic("glm_asr_triton_example", config)
 
 
+@st.cache_resource
+def load_triton_template_model():
+    """Load Triton Template model."""
+    config = {
+        'BACKEND': 'cublas',
+        'FUSED': False
+    }
+    return load_triton_model_generic("glm_asr_triton_template", config)
+
+
 def load_torch_model(folder_name, dtype="auto"):
     """Load a Torch-based model from the specified folder."""
     import importlib
@@ -255,6 +265,7 @@ def load_scratch_model():
 
 MODEL_CHOICES = [
     ("Triton Example (Baseline)", "triton_example", load_triton_example_model),
+    ("Triton Template", "triton_template", load_triton_template_model),
     ("CuTile Example (Baseline)", "cutile_example", load_cutile_example_model),
     ("CuTile Template", "cutile_template", load_cutile_model),
     ("Scratch (PyTorch)", "scratch", load_scratch_model),
