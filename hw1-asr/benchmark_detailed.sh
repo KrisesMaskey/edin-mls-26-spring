@@ -13,6 +13,7 @@
 #   ./benchmark_detailed.sh glm_asr_cutile_example
 #   ./benchmark_detailed.sh glm_asr_cutile_template --runs 5
 #   ./benchmark_detailed.sh glm_asr_cutile_example --nsys
+#   ./benchmark_detailed.sh glm_asr_triton_example
 #   ./benchmark_detailed.sh --attention-only --seq-len 512
 #
 

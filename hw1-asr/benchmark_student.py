@@ -6,6 +6,7 @@ Tests student implementations against expected output.
 Usage:
     python benchmark_student.py <folder_name>
     python benchmark_student.py glm_asr_cutile_template
+    python benchmark_student.py glm_asr_triton_example
     python benchmark_student.py glm_asr_scratch
 """
 
@@ -14,6 +15,7 @@ import time
 import sys
 import os
 import numpy as np
+import importlib
 
 # Expected transcription for the test audio
 EXPECTED_TEXT = "CONCORD RETURNED TO ITS PLACE AMIDST THE TENTS"
@@ -230,6 +232,107 @@ def benchmark_cutile_folder(folder_name, audio_array, num_warmup=1, num_runs=3):
     }
 
 
+def benchmark_triton_folder(folder_name, audio_array, num_warmup=1, num_runs=3):
+    """Benchmark a Triton implementation folder (Torch tensors)."""
+    import torch
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    folder_path = os.path.join(script_dir, folder_name)
+
+    if not os.path.isdir(folder_path):
+        raise FileNotFoundError(f"Folder not found: {folder_path}")
+
+    required_files = ['__init__.py', 'model.py', 'layers.py', 'weight_loader.py']
+    missing = [f for f in required_files if not os.path.exists(os.path.join(folder_path, f))]
+    if missing:
+        raise FileNotFoundError(f"Missing required files: {', '.join(missing)}")
+
+    sys.path.insert(0, folder_path)
+
+    for mod_name in list(sys.modules.keys()):
+        if mod_name in ['weight_loader', 'model', 'layers', 'attention', 'rope', 'conv', 'decode_attention']:
+            del sys.modules[mod_name]
+
+    if 'example' in folder_name.lower():
+        print("Applying baseline configuration (example)...")
+        layers = importlib.import_module("layers")
+        layers.Linear.BACKEND = 'cublas'
+        layers.MLP.FUSED = False
+        if hasattr(layers, 'EncoderMLP'):
+            layers.EncoderMLP.FUSED = False
+
+    print(f"Loading model from {folder_name}...")
+    from weight_loader import load_model_from_hf
+    model, processor = load_model_from_hf("zai-org/GLM-ASR-Nano-2512")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    input_features, input_ids, input_features_mask = prepare_inputs_torch(
+        audio_array, processor, device
+    )
+
+    generate_fn = model.generate
+    if hasattr(model, 'generate_v8b'):
+        generate_fn = model.generate_v8b
+    elif hasattr(model, 'generate_v8'):
+        generate_fn = model.generate_v8
+    elif hasattr(model, 'generate_v6'):
+        generate_fn = model.generate_v6
+
+    print(f"Using generate function: {generate_fn.__name__}")
+
+    print(f"Warmup ({num_warmup} runs)...")
+    for _ in range(num_warmup):
+        with torch.no_grad():
+            try:
+                _ = generate_fn(
+                    input_features, input_ids=input_ids, input_features_mask=input_features_mask,
+                    max_new_tokens=100, temperature=1.0, top_k=1
+                )
+            except TypeError:
+                _ = generate_fn(
+                    input_features, input_ids=input_ids,
+                    max_new_tokens=100, temperature=1.0, top_k=1
+                )
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+
+    print(f"Benchmarking ({num_runs} runs)...")
+    times = []
+    for i in range(num_runs):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        start = time.perf_counter()
+        with torch.no_grad():
+            try:
+                output = generate_fn(
+                    input_features, input_ids=input_ids, input_features_mask=input_features_mask,
+                    max_new_tokens=100, temperature=1.0, top_k=1
+                )
+            except TypeError:
+                output = generate_fn(
+                    input_features, input_ids=input_ids,
+                    max_new_tokens=100, temperature=1.0, top_k=1
+                )
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        elapsed = (time.perf_counter() - start) * 1000
+        times.append(elapsed)
+        tokens = output.shape[1] - input_ids.shape[1]
+        print(f"  Run {i+1}: {elapsed:.1f}ms ({tokens} tokens)")
+
+    generated_np = output.detach().cpu().numpy()
+    transcription = decode_output(generated_np, processor)
+
+    sys.path.remove(folder_path)
+
+    return {
+        'mean': np.mean(times),
+        'std': np.std(times),
+        'transcription': transcription,
+        'tokens': tokens
+    }
+
+
 def benchmark_scratch_folder(folder_name, audio_array, num_warmup=1, num_runs=3):
     """Benchmark the scratch (PyTorch) implementation folder."""
     import torch
@@ -347,6 +450,43 @@ def prepare_inputs(audio_array, processor):
     return input_features, input_ids, input_features_mask
 
 
+def prepare_inputs_torch(audio_array, processor, device):
+    """Prepare inputs for Triton model (Torch tensors)."""
+    import torch
+    if hasattr(processor, 'apply_transcription_request'):
+        inputs = processor.apply_transcription_request(audio_array)
+        input_features = inputs.input_features.to(device=device, dtype=torch.float32)
+        input_ids = inputs.input_ids.to(device=device, dtype=torch.int64)
+        input_features_mask = None
+        if hasattr(inputs, 'input_features_mask') and inputs.input_features_mask is not None:
+            input_features_mask = inputs.input_features_mask.to(device=device, dtype=torch.float32)
+    else:
+        features = processor(audio_array, sampling_rate=16000, return_tensors="pt", padding="max_length")
+        input_features = features['input_features'].to(device=device, dtype=torch.float32)
+
+        mel_frames = input_features.shape[-1]
+        num_audio_tokens = max(1, mel_frames // 2 // 4)
+
+        user_token_id = 59253
+        assistant_token_id = 59254
+        begin_audio_token_id = 59261
+        end_audio_token_id = 59262
+        audio_token_id = 59260
+        newline_token_id = 10
+        prompt_token_ids = [9249, 70891, 419, 7122, 1119, 1467]
+
+        input_ids_list = [user_token_id, newline_token_id, begin_audio_token_id]
+        input_ids_list.extend([audio_token_id] * num_audio_tokens)
+        input_ids_list.extend([end_audio_token_id, user_token_id, newline_token_id])
+        input_ids_list.extend(prompt_token_ids)
+        input_ids_list.extend([assistant_token_id, newline_token_id])
+
+        input_ids = torch.tensor([input_ids_list], dtype=torch.int64, device=device)
+        input_features_mask = None
+
+    return input_features, input_ids, input_features_mask
+
+
 def decode_output(generated_np, processor):
     """Decode output tokens to text."""
     try:
@@ -411,6 +551,7 @@ def main():
     # Determine implementation type
     folder = args.folder
     is_scratch = 'scratch' in folder.lower()
+    is_triton = 'triton' in folder.lower()
 
     print("\n" + "=" * 70)
     print(f"Testing: {folder}")
@@ -419,6 +560,8 @@ def main():
     try:
         if is_scratch:
             results = benchmark_scratch_folder(folder, audio_array, args.warmup, args.runs)
+        elif is_triton:
+            results = benchmark_triton_folder(folder, audio_array, args.warmup, args.runs)
         else:
             results = benchmark_cutile_folder(folder, audio_array, args.warmup, args.runs)
 

@@ -4,17 +4,18 @@ This assignment helps you understand GPU kernel optimization by implementing a s
 
 ## Overview
 
-GLM-ASR is a speech-to-text model that converts audio into text. The Triton version is not released yet; the current HW1 uses the CuTile template and focuses on performance optimization.
+GLM-ASR is a speech-to-text model that converts audio into text. This HW1 includes a Triton example and CuTile template, and focuses on performance optimization.
 
 ## Frameworks
 
-- **Triton**: Not released yet (will be listed first when available)
-- **cuTile**: Current HW1 implementation
+- **Triton**: Example baseline implementation (Torch + Triton kernels)
+- **cuTile**: Current HW1 implementation (CuPy + CuTile kernels)
 
 ## Directory Structure
 
 ```
 student_version/
+├── glm_asr_triton_example/    # Reference: Triton baseline (Torch + Triton)
 ├── glm_asr_cutile_template/   # YOUR WORK: Complete the TODOs here
 ├── glm_asr_cutile_example/    # Reference: Example baseline (Initial CuPy, ~3200ms)
 ├── glm_asr_scratch/           # Reference: PyTorch baseline
@@ -31,6 +32,7 @@ student_version/
 
 | Version | Description | Performance |
 |---------|-------------|-------------|
+| `glm_asr_triton_example` | Baseline: Torch + Triton | - |
 | `glm_asr_cutile_example` | Baseline: Pure CuPy | ~3200ms |
 | `glm_asr_scratch` | PyTorch reference implementation | - |
 
@@ -51,6 +53,9 @@ First, verify the reference implementations work:
 ```bash
 # Test baseline (~3200ms)
 ./benchmark.sh glm_asr_cutile_example
+
+# Test Triton baseline
+./benchmark.sh glm_asr_triton_example
 
 ```
 
@@ -126,8 +131,14 @@ Shell scripts provide user-friendly wrappers with folder validation and help mes
 # Test baseline
 ./benchmark.sh glm_asr_cutile_example
 
+# Test Triton baseline
+./benchmark.sh glm_asr_triton_example
+
 # Detailed performance analysis
 ./benchmark_detailed.sh glm_asr_cutile_template
+
+# Detailed performance analysis (Triton)
+./benchmark_detailed.sh glm_asr_triton_example
 
 # Profile specific operators
 ./benchmark_detailed.sh --attention-only
@@ -145,8 +156,10 @@ Python scripts offer more options and can be used directly without shell.
 # Basic benchmark with options
 python benchmark_student.py glm_asr_cutile_template
 python benchmark_student.py glm_asr_cutile_example --warmup 1 --runs 3
+python benchmark_student.py glm_asr_triton_example --warmup 1 --runs 3
 # Detailed profiling
 python benchmark_detailed.py glm_asr_cutile_template
+python benchmark_detailed.py glm_asr_triton_example
 ```
 
 ### Streamlit Demo
@@ -157,7 +170,7 @@ Interactive web UI for testing transcription:
 streamlit run demo.py
 ```
 
-Select from: `CuTile Example (Baseline)`, `CuTile Template`, `Scratch (PyTorch)`
+Select from: `Triton Example (Baseline)`, `CuTile Example (Baseline)`, `CuTile Template`, `Scratch (PyTorch)`
 
 ### Check the WebUI of your slurm job on your PC
 First, check the port from the output of `streamlit run demo.py`.
@@ -176,7 +189,7 @@ In the output of `show_tunnel.sh`, you will get the instruction of running a spe
 
 2. **Test incrementally**: After implementing each layer, run the benchmark to check correctness.
 
-3. **Use CuPy**: The implementation uses CuPy for GPU operations. Key functions:
+3. **Use CuPy** (CuTile) / **Use Torch + Triton** (Triton): The implementation uses CuPy for CuTile kernels and Torch + Triton for Triton kernels. Key functions:
    - `cp.matmul()` - Matrix multiplication
    - `cp.einsum()` - Einstein summation
    - `cp.exp()`, `cp.sqrt()` - Element-wise operations

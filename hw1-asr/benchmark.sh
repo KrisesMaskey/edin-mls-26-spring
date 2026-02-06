@@ -5,6 +5,7 @@
 #
 # Examples:
 #   ./benchmark.sh glm_asr_cutile_template
+#   ./benchmark.sh glm_asr_triton_example
 #   ./benchmark.sh glm_asr_scratch
 #   ./benchmark.sh glm_asr_cutile_template --audio /path/to/test.wav
 #   ./benchmark.sh glm_asr_cutile_template --warmup 2 --runs 5

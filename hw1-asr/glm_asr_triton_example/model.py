@@ -1,15 +1,14 @@
 """
-Pure CuTile GLM-ASR Model Implementation
-End-to-end implementation using only NVIDIA CuTile kernels
+Triton GLM-ASR Model Implementation
+Torch + Triton implementation
 """
 
-import cuda.tile as ct
-import cupy as cp
+import torch
 import numpy as np
 from typing import Optional, Tuple, List, Union
 from dataclasses import dataclass
 
-# Import CuTile components
+# Import Triton components
 from layers import (
     RMSNorm, LayerNorm, Linear, Embedding, MLP,
     gelu, silu, softmax, get_stream
@@ -89,10 +88,10 @@ class AudioEncoderLayer:
 
     def __call__(
         self,
-        hidden_states: cp.ndarray,
-        attention_mask: Optional[cp.ndarray] = None,
-        position_embeddings: Optional[Tuple[cp.ndarray, cp.ndarray]] = None
-    ) -> cp.ndarray:
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+    ) -> torch.Tensor:
         batch, seq_len, _ = hidden_states.shape
 
         # Self-attention with pre-norm
@@ -105,9 +104,9 @@ class AudioEncoderLayer:
         v = self.v_proj(hidden_states)
 
         # Reshape for attention
-        q = q.reshape(batch, seq_len, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
-        k = k.reshape(batch, seq_len, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
-        v = v.reshape(batch, seq_len, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        q = q.reshape(batch, seq_len, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
+        k = k.reshape(batch, seq_len, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
+        v = v.reshape(batch, seq_len, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
 
         # Apply RoPE if provided (partial rotation for audio encoder)
         if position_embeddings is not None:
@@ -116,7 +115,7 @@ class AudioEncoderLayer:
 
         # Attention
         attn_output = scaled_dot_product_attention(q, k, v, attention_mask)
-        attn_output = attn_output.transpose(0, 2, 1, 3).reshape(batch, seq_len, -1)
+        attn_output = attn_output.permute(0, 2, 1, 3).reshape(batch, seq_len, -1)
 
         # Output projection + residual
         hidden_states = self.out_proj(attn_output)
@@ -134,7 +133,7 @@ class AudioEncoderLayer:
 
 
 class AudioEncoder:
-    """Whisper-style audio encoder using pure CuTile with RoPE."""
+    """Whisper-style audio encoder using Torch + Triton with RoPE."""
 
     def __init__(self, config: GlmAsrConfig):
         self.config = config
@@ -172,21 +171,23 @@ class AudioEncoder:
 
     def __call__(
         self,
-        input_features: cp.ndarray,  # (batch, features, time)
-        attention_mask: Optional[cp.ndarray] = None
-    ) -> cp.ndarray:
+        input_features: torch.Tensor,  # (batch, features, time)
+        attention_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         # Convolutional feature extraction
         # input_features: (batch, mel_channels, time)
         hidden_states = gelu(self.conv1(input_features))
         hidden_states = gelu(self.conv2(hidden_states))
 
         # (batch, hidden, time) -> (batch, time, hidden)
-        hidden_states = hidden_states.transpose(0, 2, 1)
+        hidden_states = hidden_states.permute(0, 2, 1)
 
         batch, seq_len, _ = hidden_states.shape
 
         # Compute RoPE position embeddings
-        position_ids = cp.arange(seq_len, dtype=cp.int64)[None, :]
+        position_ids = torch.arange(
+            seq_len, dtype=torch.int64, device=hidden_states.device
+        )[None, :]
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
         # Transformer layers with RoPE
@@ -243,13 +244,13 @@ class DecoderLayer:
 
     def __call__(
         self,
-        hidden_states: cp.ndarray,
-        attention_mask: Optional[cp.ndarray] = None,
-        position_ids: Optional[cp.ndarray] = None,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
         is_causal: bool = True,
-        past_key_value: Optional[Tuple[cp.ndarray, cp.ndarray]] = None,
+        past_key_value: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         use_cache: bool = False
-    ) -> Union[cp.ndarray, Tuple[cp.ndarray, Tuple[cp.ndarray, cp.ndarray]]]:
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]]:
         """Forward pass with optional KV cache support.
 
         Args:
@@ -276,9 +277,9 @@ class DecoderLayer:
         v = self.v_proj(hidden_states)
 
         # Reshape for attention
-        q = q.reshape(batch, seq_len, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
-        k = k.reshape(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(0, 2, 1, 3)
-        v = v.reshape(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(0, 2, 1, 3)
+        q = q.reshape(batch, seq_len, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
+        k = k.reshape(batch, seq_len, self.num_kv_heads, self.head_dim).permute(0, 2, 1, 3)
+        v = v.reshape(batch, seq_len, self.num_kv_heads, self.head_dim).permute(0, 2, 1, 3)
 
         # Apply RoPE
         cos, sin = self.rope(q, position_ids)
@@ -288,8 +289,8 @@ class DecoderLayer:
         if past_key_value is not None:
             past_key, past_value = past_key_value
             # Concatenate past K/V with current K/V
-            k = cp.concatenate([past_key, k], axis=2)
-            v = cp.concatenate([past_value, v], axis=2)
+            k = torch.cat([past_key, k], dim=2)
+            v = torch.cat([past_value, v], dim=2)
 
         # Store current K/V for cache if needed
         if use_cache:
@@ -298,7 +299,7 @@ class DecoderLayer:
         # Attention with GQA support
         # When using KV cache, only query the new positions but attend to all K/V
         attn_output = self.attention(q, k, v, attention_mask, is_causal and past_key_value is None)
-        attn_output = attn_output.transpose(0, 2, 1, 3).reshape(batch, seq_len, -1)
+        attn_output = attn_output.permute(0, 2, 1, 3).reshape(batch, seq_len, -1)
 
         # Output projection + residual
         hidden_states = self.o_proj(attn_output)
@@ -316,11 +317,11 @@ class DecoderLayer:
 
     def forward_with_kv_buffer(
         self,
-        hidden_states: cp.ndarray,
-        kv_buffer: Tuple[cp.ndarray, cp.ndarray],
+        hidden_states: torch.Tensor,
+        kv_buffer: Tuple[torch.Tensor, torch.Tensor],
         cache_pos: int,
-        position_ids: cp.ndarray,
-    ) -> Tuple[cp.ndarray, int]:
+        position_ids: torch.Tensor,
+    ) -> Tuple[torch.Tensor, int]:
         """V8.1: Forward pass with pre-allocated KV buffer (no concatenation).
 
         Args:
@@ -346,12 +347,12 @@ class DecoderLayer:
         v = self.v_proj(hidden_states)
 
         # Reshape for attention
-        q = q.reshape(batch, seq_len, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
-        k = k.reshape(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(0, 2, 1, 3)
-        v = v.reshape(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(0, 2, 1, 3)
+        q = q.reshape(batch, seq_len, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
+        k = k.reshape(batch, seq_len, self.num_kv_heads, self.head_dim).permute(0, 2, 1, 3)
+        v = v.reshape(batch, seq_len, self.num_kv_heads, self.head_dim).permute(0, 2, 1, 3)
 
         # V8.2: Make V contiguous now (it won't be processed by RoPE)
-        v = cp.ascontiguousarray(v)
+        v = v.contiguous()
 
         # Apply RoPE (creates contiguous Q/K outputs via concatenation)
         cos, sin = self.rope(q, position_ids)
@@ -368,7 +369,7 @@ class DecoderLayer:
 
         # Attention with GQA support
         attn_output = self.attention(q, k_for_attn, v_for_attn, None, cache_pos == 0)
-        attn_output = attn_output.transpose(0, 2, 1, 3).reshape(batch, seq_len, -1)
+        attn_output = attn_output.permute(0, 2, 1, 3).reshape(batch, seq_len, -1)
 
         # Output projection + residual
         hidden_states = self.o_proj(attn_output)
@@ -384,7 +385,7 @@ class DecoderLayer:
 
 
 class TextDecoder:
-    """Llama-style text decoder using pure CuTile."""
+    """Llama-style text decoder using Torch + Triton."""
 
     def __init__(self, config: GlmAsrConfig):
         self.config = config
@@ -417,13 +418,13 @@ class TextDecoder:
 
     def __call__(
         self,
-        input_ids: Optional[cp.ndarray] = None,
-        inputs_embeds: Optional[cp.ndarray] = None,
-        attention_mask: Optional[cp.ndarray] = None,
-        position_ids: Optional[cp.ndarray] = None,
-        past_key_values: Optional[List[Tuple[cp.ndarray, cp.ndarray]]] = None,
+        input_ids: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
+        past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
         use_cache: bool = False
-    ) -> Union[cp.ndarray, Tuple[cp.ndarray, List[Tuple[cp.ndarray, cp.ndarray]]]]:
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]]]:
         """Forward pass with optional KV cache support.
 
         Args:
@@ -448,7 +449,12 @@ class TextDecoder:
         if position_ids is None:
             # If we have past_key_values, offset position_ids
             past_length = past_key_values[0][0].shape[2] if past_key_values is not None else 0
-            position_ids = cp.arange(past_length, past_length + seq_len, dtype=cp.int64)[None, :].repeat(batch, axis=0)
+            position_ids = torch.arange(
+                past_length,
+                past_length + seq_len,
+                dtype=torch.int64,
+                device=hidden_states.device,
+            )[None, :].repeat(batch, 1)
 
         # Transformer layers with KV cache
         present_key_values = [] if use_cache else None
@@ -485,10 +491,10 @@ class TextDecoder:
 
     def forward_with_kv_buffers(
         self,
-        inputs_embeds: cp.ndarray,
-        kv_buffers: List[Tuple[cp.ndarray, cp.ndarray]],
+        inputs_embeds: torch.Tensor,
+        kv_buffers: List[Tuple[torch.Tensor, torch.Tensor]],
         cache_pos: int,
-    ) -> Tuple[cp.ndarray, int]:
+    ) -> Tuple[torch.Tensor, int]:
         """V8.1: Forward with pre-allocated KV buffers.
 
         Args:
@@ -503,7 +509,12 @@ class TextDecoder:
         batch, seq_len, _ = hidden_states.shape
 
         # Generate position ids
-        position_ids = cp.arange(cache_pos, cache_pos + seq_len, dtype=cp.int64)[None, :].repeat(batch, axis=0)
+        position_ids = torch.arange(
+            cache_pos,
+            cache_pos + seq_len,
+            dtype=torch.int64,
+            device=hidden_states.device,
+        )[None, :].repeat(batch, 1)
 
         # Process through layers
         new_cache_pos = cache_pos
@@ -524,8 +535,8 @@ class TextDecoder:
         self,
         batch_size: int,
         max_seq_len: int,
-        dtype=cp.float32,
-    ) -> List[Tuple[cp.ndarray, cp.ndarray]]:
+        dtype=torch.float32,
+    ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
         """Allocate KV buffers for all layers.
 
         Returns:
@@ -535,9 +546,19 @@ class TextDecoder:
         num_kv_heads = self.config.text_num_kv_heads
 
         kv_buffers = []
+        device = getattr(self.embed_tokens, "weight", None)
+        device = device.device if device is not None else None
         for _ in range(self.num_layers):
-            key_buffer = cp.zeros((batch_size, num_kv_heads, max_seq_len, head_dim), dtype=dtype)
-            value_buffer = cp.zeros((batch_size, num_kv_heads, max_seq_len, head_dim), dtype=dtype)
+            key_buffer = torch.zeros(
+                (batch_size, num_kv_heads, max_seq_len, head_dim),
+                dtype=dtype,
+                device=device,
+            )
+            value_buffer = torch.zeros(
+                (batch_size, num_kv_heads, max_seq_len, head_dim),
+                dtype=dtype,
+                device=device,
+            )
             kv_buffers.append((key_buffer, value_buffer))
 
         return kv_buffers
@@ -558,7 +579,7 @@ class MultiModalProjector:
         self.act = gelu
         self.linear_2 = Linear(config.projector_hidden_size, config.text_hidden_size, bias=True)
 
-    def _pool_frames(self, audio_features: cp.ndarray) -> cp.ndarray:
+    def _pool_frames(self, audio_features: torch.Tensor) -> torch.Tensor:
         """Pool audio frames by concatenating consecutive frames.
 
         Args:
@@ -591,7 +612,7 @@ class MultiModalProjector:
 
         return audio_features
 
-    def __call__(self, audio_features: cp.ndarray) -> cp.ndarray:
+    def __call__(self, audio_features: torch.Tensor) -> torch.Tensor:
         # Pool consecutive frames
         pooled = self._pool_frames(audio_features)
         # Project through MLP
@@ -606,7 +627,7 @@ class MultiModalProjector:
 # ============================================================================
 
 class GlmAsrModel:
-    """GLM-ASR model using pure CuTile kernels."""
+    """GLM-ASR model using Torch + Triton kernels."""
 
     def __init__(self, config: GlmAsrConfig):
         self.config = config
@@ -621,9 +642,9 @@ class GlmAsrModel:
 
     def encode_audio(
         self,
-        input_features: cp.ndarray,
-        input_features_mask: Optional[cp.ndarray] = None
-    ) -> cp.ndarray:
+        input_features: torch.Tensor,
+        input_features_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """Encode audio features.
 
         Args:
@@ -638,7 +659,7 @@ class GlmAsrModel:
 
         if input_features_mask is not None:
             # Compute audio lengths after conv layers (matching HF implementation)
-            audio_lengths = cp.sum(input_features_mask, axis=-1)
+            audio_lengths = torch.sum(input_features_mask, dim=-1)
             for padding, kernel_size, stride in [(1, 3, 1), (1, 3, 2)]:
                 audio_lengths = (audio_lengths + 2 * padding - (kernel_size - 1) - 1) // stride + 1
             merge_factor = 4
@@ -646,7 +667,7 @@ class GlmAsrModel:
 
             # Create mask and extract valid embeddings
             seq_len = projected.shape[1]
-            valid_mask = cp.arange(seq_len)[None, :] < post_lengths[:, None]
+            valid_mask = torch.arange(seq_len, device=projected.device)[None, :] < post_lengths[:, None]
             # Flatten valid frames (removes batch dimension for now)
             projected = projected[valid_mask]
 
@@ -654,12 +675,12 @@ class GlmAsrModel:
 
     def decode(
         self,
-        input_ids: Optional[cp.ndarray] = None,
-        inputs_embeds: Optional[cp.ndarray] = None,
-        attention_mask: Optional[cp.ndarray] = None,
-        past_key_values: Optional[List[Tuple[cp.ndarray, cp.ndarray]]] = None,
+        input_ids: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
         use_cache: bool = False
-    ) -> Union[cp.ndarray, Tuple[cp.ndarray, List[Tuple[cp.ndarray, cp.ndarray]]]]:
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]]]:
         """Decode to logits with optional KV cache support."""
         result = self.text_decoder(
             input_ids=input_ids,
@@ -680,9 +701,9 @@ class GlmAsrModel:
 
     def forward(
         self,
-        input_features: cp.ndarray,
-        input_ids: Optional[cp.ndarray] = None
-    ) -> cp.ndarray:
+        input_features: torch.Tensor,
+        input_ids: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """Full forward pass."""
         # Encode audio
         audio_embeds = self.encode_audio(input_features)
@@ -691,7 +712,7 @@ class GlmAsrModel:
             # Get text embeddings
             text_embeds = self.text_decoder.embed_tokens(input_ids)
             # Concatenate audio and text
-            inputs_embeds = cp.concatenate([audio_embeds, text_embeds], axis=1)
+            inputs_embeds = torch.cat([audio_embeds, text_embeds], dim=1)
         else:
             inputs_embeds = audio_embeds
 
@@ -701,15 +722,15 @@ class GlmAsrModel:
 
     def generate(
         self,
-        input_features: cp.ndarray,
-        input_ids: Optional[cp.ndarray] = None,
-        input_features_mask: Optional[cp.ndarray] = None,
-        attention_mask: Optional[cp.ndarray] = None,
+        input_features: torch.Tensor,
+        input_ids: Optional[torch.Tensor] = None,
+        input_features_mask: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
         max_new_tokens: int = 256,
         temperature: float = 1.0,
         top_k: int = 50,
         audio_pad_token_id: int = 59260  # <|pad|> token for audio
-    ) -> cp.ndarray:
+    ) -> torch.Tensor:
         """Generate tokens from audio with proper chat template format.
 
         Args:
@@ -743,29 +764,32 @@ class GlmAsrModel:
             # Note: We INSERT all audio embeddings at the first pad position,
             # rather than replacing pad tokens 1-to-1
             audio_mask = (input_ids == audio_pad_token_id)
-            audio_positions = cp.where(audio_mask[0])[0]
+            audio_positions = torch.where(audio_mask[0])[0]
 
             if len(audio_positions) > 0:
                 # Find the first and last pad positions
-                first_pad_pos = int(audio_positions[0].get())
-                last_pad_pos = int(audio_positions[-1].get())
+                first_pad_pos = int(audio_positions[0].item())
+                last_pad_pos = int(audio_positions[-1].item())
 
                 # Split text embeddings: before pads, after pads
                 before_audio = text_embeds[0, :first_pad_pos, :]  # (first_pad_pos, hidden)
                 after_audio = text_embeds[0, last_pad_pos + 1:, :]  # (remaining, hidden)
 
                 # Concatenate: [before] + [audio_embeds] + [after]
-                inputs_embeds = cp.concatenate([
-                    before_audio[None, :, :],
-                    audio_embeds[None, :, :],
-                    after_audio[None, :, :]
-                ], axis=1)
+                inputs_embeds = torch.cat(
+                    [
+                        before_audio[None, :, :],
+                        audio_embeds[None, :, :],
+                        after_audio[None, :, :],
+                    ],
+                    dim=1,
+                )
             else:
                 # No pad tokens - just use text embeddings
                 inputs_embeds = text_embeds
 
             # Track generated tokens (start from input_ids)
-            generated = input_ids.copy()
+            generated = input_ids.clone()
 
         else:
             # No input_ids - use simple concatenation (legacy mode)
@@ -773,20 +797,23 @@ class GlmAsrModel:
             if audio_embeds.ndim == 2:
                 audio_embeds = audio_embeds[None, :, :]
             inputs_embeds = audio_embeds
-            generated = cp.full(
+            generated = torch.full(
                 (batch_size, 1),
                 self.config.bos_token_id,
-                dtype=cp.int64
+                dtype=torch.int64,
+                device=inputs_embeds.device,
             )
 
         # Track which sequences have finished (hit EOS)
-        finished = cp.zeros(batch_size, dtype=cp.bool_)
+        finished = torch.zeros(batch_size, dtype=torch.bool, device=generated.device)
 
         # Handle single or multiple EOS token IDs
         eos_token_ids = self.config.eos_token_id
         if isinstance(eos_token_ids, int):
             eos_token_ids = [eos_token_ids]
-        eos_token_ids_cp = cp.array(eos_token_ids, dtype=cp.int64)
+        eos_token_ids_cp = torch.tensor(
+            eos_token_ids, dtype=torch.int64, device=generated.device
+        )
 
         # Autoregressive generation
         for _ in range(max_new_tokens):
@@ -796,40 +823,45 @@ class GlmAsrModel:
 
             # Top-k sampling
             if top_k > 0 and top_k < next_token_logits.shape[-1]:
-                top_k_indices = cp.argsort(next_token_logits, axis=-1)[:, -top_k:]
-                top_k_logits = cp.take_along_axis(next_token_logits, top_k_indices, axis=-1)
+                top_k_indices = torch.argsort(next_token_logits, dim=-1)[:, -top_k:]
+                top_k_logits = torch.gather(next_token_logits, dim=-1, index=top_k_indices)
 
                 # Softmax
-                top_k_logits_shifted = top_k_logits - cp.max(top_k_logits, axis=-1, keepdims=True)
-                exp_logits = cp.exp(top_k_logits_shifted)
-                probs = exp_logits / cp.sum(exp_logits, axis=-1, keepdims=True)
+                top_k_logits_shifted = top_k_logits - torch.max(
+                    top_k_logits, dim=-1, keepdim=True
+                ).values
+                exp_logits = torch.exp(top_k_logits_shifted)
+                probs = exp_logits / torch.sum(exp_logits, dim=-1, keepdim=True)
 
                 # Sample
-                cumprobs = cp.cumsum(probs, axis=-1)
-                samples = cp.random.uniform(size=(batch_size, 1))
-                next_token_idx = cp.argmax(cumprobs >= samples, axis=-1)
-                next_token = cp.take_along_axis(
+                cumprobs = torch.cumsum(probs, dim=-1)
+                samples = torch.rand((batch_size, 1), device=next_token_logits.device)
+                print("DEBUG: Casting boolean tensor to float...")
+                next_token_idx = torch.argmax((cumprobs >= samples).to(torch.float32), dim=-1)
+                next_token = torch.gather(
                     top_k_indices,
-                    next_token_idx[:, None],
-                    axis=-1
+                    dim=-1,
+                    index=next_token_idx[:, None],
                 )
             else:
-                next_token = cp.argmax(next_token_logits, axis=-1, keepdims=True)
+                next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
 
             # Append to generated
-            generated = cp.concatenate([generated, next_token], axis=1)
+            generated = torch.cat([generated, next_token], dim=1)
 
             # Check for EOS - mark sequences that generated any EOS token
             next_token_flat = next_token.flatten()
-            is_eos = cp.any(next_token_flat[:, None] == eos_token_ids_cp[None, :], axis=1)
+            is_eos = torch.any(
+                next_token_flat[:, None] == eos_token_ids_cp[None, :], dim=1
+            )
             finished = finished | is_eos
 
             # Stop if all sequences have finished
-            if cp.all(finished):
+            if torch.all(finished):
                 break
 
             # Update inputs_embeds with new token
             new_embeds = self.text_decoder.embed_tokens(next_token)
-            inputs_embeds = cp.concatenate([inputs_embeds, new_embeds], axis=1)
+            inputs_embeds = torch.cat([inputs_embeds, new_embeds], dim=1)
 
         return generated

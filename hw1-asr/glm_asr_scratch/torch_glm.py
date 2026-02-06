@@ -67,7 +67,7 @@ class GlmAsrProcessor:
         Prepare inputs for transcription, matching transformers' behavior.
 
         The input format follows the chat template:
-        <|user|>\n<|begin_of_audio|><|pad|>...<|end_of_audio|><|user|>\n{prompt}<|assistant|>\n
+        <|begin_of_audio|><|pad|>...<|end_of_audio|><|user|>{prompt}<|assistant|>
 
         Args:
             audio: Audio waveform (numpy array), file path, or list of audio
@@ -97,10 +97,10 @@ class GlmAsrProcessor:
 
         input_features = features['input_features']
 
-        # Calculate number of audio tokens after all processing:
-        # mel frames -> conv (//2) -> reshape (//4) = mel_frames // 8
+        # Calculate number of audio tokens after processing.
+        # Match demo/triton template: use mel_frames // 4.
         mel_frames = input_features.shape[1]
-        num_audio_tokens = mel_frames // 2 // 4
+        num_audio_tokens = mel_frames // 4
 
         # Ensure we have at least some tokens
         num_audio_tokens = max(1, num_audio_tokens)
@@ -109,10 +109,8 @@ class GlmAsrProcessor:
         prompt_token_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
 
         # Build input_ids following the chat template:
-        # <|user|>\n<|begin_of_audio|><|pad|>...<|end_of_audio|><|user|>\n{prompt}<|assistant|>\n
+        # <|begin_of_audio|><|pad|>...<|end_of_audio|><|user|>{prompt}<|assistant|>
         input_ids_list = [
-            self.user_token_id,           # <|user|>
-            self.newline_token_id,        # \n
             self.begin_audio_token_id,    # <|begin_of_audio|>
         ]
 
@@ -122,7 +120,6 @@ class GlmAsrProcessor:
         input_ids_list.extend([
             self.end_audio_token_id,      # <|end_of_audio|>
             self.user_token_id,           # <|user|>
-            self.newline_token_id,        # \n
         ])
 
         # Add prompt tokens
@@ -130,7 +127,6 @@ class GlmAsrProcessor:
 
         input_ids_list.extend([
             self.assistant_token_id,      # <|assistant|>
-            self.newline_token_id,        # \n
         ])
 
         # Convert to tensor
