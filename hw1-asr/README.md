@@ -17,7 +17,7 @@ GLM-ASR is a speech-to-text model that converts audio into text. This HW1 includ
 student_version/
 ├── glm_asr_triton_example/     # Reference: Triton baseline (Torch + Triton)
 ├── glm_asr_triton_template/    # YOUR WORK: Complete the TODOs here (Triton)
-├── glm_asr_cutile_example/     # Reference: Example baseline (Initial CuPy)
+├── glm_asr_cutile_example/     # Reference: Example baseline (Initial CuPy + cuTile)
 ├── glm_asr_cutile_template/    # YOUR WORK: Complete the TODOs here (cuTile)
 ├── glm_asr_scratch/            # Reference: PyTorch baseline
 ├── demo.py                    # Streamlit interactive demo
