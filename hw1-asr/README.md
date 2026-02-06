@@ -128,6 +128,8 @@ Open the template for your track and complete the TODO sections in:
 - `glm_asr_cutile_template/layers.py`
 - `glm_asr_cutile_template/rope.py`
 
+> [!NOTE]
+> You are not limited to filling the existing TODO kernels. You may refactor and fuse kernels (for example, implement logic that currently spans multiple kernels within a single Triton/cuTile kernel). You must implement kernels using Triton/cuTile only (do not use prebuilt operator libraries such as PyTorch).
 
 
 ### Key Files Explained
