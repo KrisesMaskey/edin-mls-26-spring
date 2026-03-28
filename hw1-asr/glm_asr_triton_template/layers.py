@@ -70,7 +70,18 @@ def rmsnorm_kernel(
     # Step 4: Apply weight and store
 
     # YOUR CODE HERE
-    pass
+    offs = tl.arange(0, BLOCK_SIZE)
+    mask = offs < hidden_size
+
+    # Load and cast to fp32 immediately for numerical stability during squaring/summing
+    x = tl.load(x_ptr + pid * stride_x + offs, mask=mask, other=0.0).to(tl.float32)
+    w = tl.load(w_ptr + offs, mask=mask, other=0.0).to(tl.float32)
+
+    variance = tl.sum(x * x, axis=0) / hidden_size
+    rsqrt_var = tl.rsqrt(variance + eps)
+    
+    y = (x * rsqrt_var) * w
+    tl.store(y_ptr + pid * stride_y + offs, y, mask=mask)
 
 
 @triton.jit
@@ -105,7 +116,19 @@ def layernorm_kernel(
     # Step 5: Normalize and apply affine transform
 
     # YOUR CODE HERE
-    pass
+    offs = tl.arange(0, BLOCK_SIZE)
+    mask = offs < hidden_size
+
+    x = tl.load(x_ptr + pid * stride_x + offs, mask=mask, other=0.0).to(tl.float32)
+    w = tl.load(w_ptr + offs, mask=mask, other=0.0).to(tl.float32)
+    b = tl.load(b_ptr + offs, mask=mask, other=0.0).to(tl.float32)
+
+    mean = tl.sum(x, axis=0) / hidden_size
+    x_centered = x - mean
+    var = tl.sum(x_centered * x_centered, axis=0) / hidden_size
+    
+    y = (x_centered * tl.rsqrt(var + eps)) * w + b
+    tl.store(y_ptr + pid * stride_y + offs, y, mask=mask)
 
 
 @triton.jit
@@ -126,7 +149,13 @@ def gelu_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
     # Step 3: Store output
 
     # YOUR CODE HERE
-    pass
+    offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offs < n_elements
+
+    x = tl.load(x_ptr + offs, mask=mask, other=0.0).to(tl.float32)
+    # Optimized Tanh approximation for GELU
+    y = 0.5 * x * (1.0 + tl.extra.cuda.libdevice.tanh(0.79788456 * (x + 0.044715 * x * x * x)))
+    tl.store(y_ptr + offs, y, mask=mask)
 
 
 @triton.jit
@@ -147,7 +176,12 @@ def silu_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
     # Step 3: Multiply and store
 
     # YOUR CODE HERE
-    pass
+    offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offs < n_elements
+
+    x = tl.load(x_ptr + offs, mask=mask, other=0.0).to(tl.float32)
+    y = x * (1.0 / (1.0 + tl.math.exp(-x)))
+    tl.store(y_ptr + offs, y, mask=mask)
 
 
 @triton.jit
@@ -188,7 +222,17 @@ def linear_kernel_tf32(
     # Step 3: Store the result
 
     # YOUR CODE HERE
-    pass
+    offs_m = (pid_m * BLOCK_M + tl.arange(0, BLOCK_M)) % M
+    offs_n = (pid_n * BLOCK_N + tl.arange(0, BLOCK_N)) % N
+    offs_k = tl.arange(0, BLOCK_K)
+
+    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+    for k in range(0, K, BLOCK_K):
+        a = tl.load(a_ptr + offs_m[:, None] * stride_am + (k + offs_k[None, :]) * stride_ak, mask=(offs_m[:, None] < M) & (k + offs_k[None, :] < K), other=0.0)
+        b = tl.load(b_ptr + (k + offs_k[:, None]) * stride_bk + offs_n[None, :] * stride_bn, mask=(k + offs_k[:, None] < K) & (offs_n[None, :] < N), other=0.0)
+        acc += tl.dot(a, b)
+
+    tl.store(c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn, acc, mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
 
 
 @triton.jit
@@ -234,7 +278,7 @@ def linear_gelu_kernel(
     sqrt_2_over_pi = 0.7978845608028654
     acc3 = acc * acc * acc
     inner = sqrt_2_over_pi * (acc + 0.044715 * acc3)
-    acc = acc * 0.5 * (1.0 + tl.libdevice.tanh(inner))
+    acc = acc * 0.5 * (1.0 + tl.extra.cuda.libdevice.tanh(inner))
 
     tl.store(
         c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn,
@@ -349,7 +393,14 @@ def softmax_kernel(x_ptr, y_ptr, stride_x, stride_y, n_cols, BLOCK_SIZE: tl.cons
     # Step 4: Store output
 
     # YOUR CODE HERE
-    pass
+    offs = tl.arange(0, BLOCK_SIZE)
+    mask = offs < n_cols
+
+    x = tl.load(x_ptr + row * stride_x + offs, mask=mask, other=-float("inf")).to(tl.float32)
+    x = x - tl.max(x, axis=0)
+    exp_x = tl.math.exp(x)
+    softmax = exp_x / tl.sum(exp_x, axis=0)
+    tl.store(y_ptr + row * stride_y + offs, softmax, mask=mask)
 
 
 @triton.jit
@@ -491,6 +542,10 @@ def causal_mask_kernel(
         mask=mask,
     )
 
+# ============================================================================
+# Fused Kernel Implementation
+# ============================================================================
+
 
 # ============================================================================
 # Layer Classes
@@ -597,7 +652,7 @@ def gelu(x: torch.Tensor) -> torch.Tensor:
     """GELU activation using Triton."""
     original_shape = x.shape
     total = int(np.prod(x.shape))
-    block = 256
+    block = 1024
 
     x_flat = x.reshape(-1).contiguous().to(torch.float32)
     output = torch.empty_like(x_flat)
@@ -638,11 +693,11 @@ def get_activation(name: str):
 class Linear:
     """Linear layer with switchable backend (torch or Triton)."""
 
-    TILE_M = 64
-    TILE_N = 64
+    TILE_M = 16
+    TILE_N = 32
     TILE_K = 32
 
-    BACKEND = "torch"
+    BACKEND = "triton"
 
     def __init__(self, in_features: int, out_features: int, bias: bool = True):
         self.in_features = in_features
@@ -675,6 +730,9 @@ class Linear:
                 self._weight_t_padded = weight_pad
             else:
                 self._weight_t_padded = weight_t
+        
+        # Free original — cache is the single source of truth from here on
+        self.weight = None
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         if Linear.BACKEND in ("torch", "cublas"):
@@ -693,9 +751,16 @@ class Linear:
 
         M = int(np.prod(batch_dims))
         x_2d = x.reshape(M, self.in_features).to(torch.float32)
+        
+        if self.weight is None:
+            # Triton path ran first and freed self.weight — reconstruct from cache
+            K, N = self.in_features, self.out_features
+            w = self._weight_t_padded[:K, :N].t().contiguous()
+        else:
+            if self.weight.device != x.device:
+                self.weight = self.weight.to(x.device)
+            w = self.weight
 
-        if self.weight.device != x.device:
-            self.weight = self.weight.to(x.device)
         output = x_2d @ self.weight.t()
 
         if self.has_bias and self.bias_param is not None:
@@ -716,9 +781,15 @@ class Linear:
 
         x_2d = x.reshape(M, K).to(torch.float32).contiguous()
 
-        if self.weight.device != x.device:
-            self.weight = self.weight.to(x.device)
+        # Device move: if cache exists but is on wrong device, rebuild it.
+        # self.weight may already be None at this point — check cache instead.
+        if self._weight_t_padded is not None and self._weight_t_padded.device != x.device:
+            # Reconstruct self.weight from cache so _ensure_weight_prepared can re-run
+            self.weight = self._weight_t_padded[:K, :N].t().contiguous().to(x.device)
             self._weight_t_padded = None
+        elif self.weight is not None and self.weight.device != x.device:
+            self.weight = self.weight.to(x.device)
+            
         self._ensure_weight_prepared()
 
         M_padded = pad_to_multiple(M, self.TILE_M)
@@ -757,6 +828,8 @@ class Linear:
             BLOCK_M=self.TILE_M,
             BLOCK_N=self.TILE_N,
             BLOCK_K=self.TILE_K,
+            num_warps=2,
+            num_stages=2
         )
 
         output = output[:M, :N]
@@ -846,7 +919,7 @@ class MLP:
     """MLP with SwiGLU gating using Triton."""
 
     FUSED = True
-    TILE_M, TILE_N, TILE_K = 64, 64, 32
+    TILE_M, TILE_N, TILE_K = 16, 32, 32
 
     def __init__(
         self,
@@ -973,7 +1046,7 @@ class EncoderMLP:
     """Encoder MLP (no gating) using Triton."""
 
     FUSED = True
-    TILE_M, TILE_N, TILE_K = 64, 64, 32
+    TILE_M, TILE_N, TILE_K = 16, 32, 32
 
     def __init__(
         self,
