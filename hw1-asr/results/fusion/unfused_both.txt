@@ -1,0 +1,102 @@
+======================================================================
+GLM-ASR Detailed Operator Profiling
+======================================================================
+
+Loading test audio...
+Audio: 3.50s @ 16000Hz
+
+Loading model from glm_asr_triton_template...
+Loading HuggingFace model: zai-org/GLM-ASR-Nano-2512
+Creating Triton model with config:
+  Audio: hidden=1280, heads=20, layers=32
+  Text: hidden=2048, heads=16, kv_heads=4, layers=28
+Loading HuggingFace weights...
+Loading audio encoder weights...
+Loading multi-modal projector weights...
+Loading text decoder weights...
+Weight loading complete!
+Input features shape: torch.Size([1, 128, 3000])
+Input IDs shape: torch.Size([1, 59])
+
+======================================================================
+DETAILED OPERATOR PROFILING (TORCH)
+======================================================================
+
+[1/4] Profiling Audio Encoder...
+  Audio Encoder: 2782.21ms (+/- 3669.05ms)
+
+[2/4] Profiling Multi-modal Projector...
+  Projector: 24.82ms (+/- 33.06ms)
+
+[3/4] Profiling Text Decoder (Prefill)...
+  Decoder Prefill: 795.65ms (+/- 1087.83ms)
+
+[4/4] Profiling Decode Steps...
+  Decode Step (avg): 37.43ms (+/- 31.78ms)
+
+[5] Profiling Individual Decoder Layers...
+  Layer 0: 1.30ms (+/- 0.08ms)
+  Layer 1: 1.19ms (+/- 0.02ms)
+  Layer 2: 1.19ms (+/- 0.02ms)
+  Layer 3: 1.19ms (+/- 0.01ms)
+  Layer 4: 1.18ms (+/- 0.02ms)
+
+======================================================================
+ATTENTION OPERATION PROFILING (TORCH)
+======================================================================
+
+Sequence length: 256
+
+[1] Standard Attention (einsum)...
+  Standard: 133.52ms (+/- 188.37ms)
+
+[2] Torch Matmul Attention...
+  Torch matmul: 1.35ms (+/- 1.49ms)
+
+======================================================================
+LINEAR/GEMM OPERATION PROFILING (TORCH)
+======================================================================
+
+Input shape: (1, 256, 2048)
+Projection: 2048 -> 5632
+
+[1] Torch matmul...
+  Torch matmul: 3.09ms (+/- 2.88ms)
+
+[2] Torch einsum...
+  Torch einsum: 1.07ms (+/- 0.02ms)
+
+[3] Torch GEMM (batched)...
+  Torch GEMM: 1.05ms (+/- 0.00ms)
+
+[4] Full MLP (SwiGLU style)...
+  Full MLP: 66.77ms (+/- 89.80ms)
+
+  Estimated GFLOPS (projection): 1913.8
+
+======================================================================
+PERFORMANCE SUMMARY
+======================================================================
+
+Component                              Time (ms)   % of Total
+------------------------------------------------------------
+Audio Encoder                          2782.21ms       50.8%
+Multi-modal Projector                    24.82ms        0.5%
+Decoder (Prefill)                       795.65ms       14.5%
+Decoder (50 decode steps)              1871.37ms       34.2%
+------------------------------------------------------------
+TOTAL (estimated for 50 tokens)        5474.06ms
+
+------------------------------------------------------------
+Attention Methods Comparison:
+------------------------------------------------------------
+  Standard (einsum)             133.52ms
+  Torch matmul                    1.35ms
+
+------------------------------------------------------------
+Linear/GEMM Methods Comparison:
+------------------------------------------------------------
+  Torch matmul                    3.09ms
+  Torch einsum                    1.07ms
+  Torch GEMM                      1.05ms
+  Full MLP (SwiGLU)              66.77ms

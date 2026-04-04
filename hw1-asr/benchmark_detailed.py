@@ -956,15 +956,6 @@ def main():
         print(f"Input features shape: {input_features.shape}")
         print(f"Input IDs shape: {input_ids.shape}")
 
-        # Add this right before line 959 in benchmark_detailed.py
-        print("Warming up Triton kernels... (3 times)")
-        for _ in range(3):
-            with torch.no_grad():
-                _ = model.generate(input_features, input_ids=input_ids,
-                                input_features_mask=input_features_mask,
-                                max_new_tokens=20, temperature=1.0, top_k=1)
-            torch.cuda.synchronize()
-
         component_results = detailed_profile_torch(model, input_features, input_ids, input_features_mask, num_runs=args.runs)
         attention_results = profile_attention_ops_torch(seq_len=args.seq_len, num_runs=args.runs)
         linear_results = profile_linear_ops_torch(seq_len=args.seq_len, num_runs=args.runs)
